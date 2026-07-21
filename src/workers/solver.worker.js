@@ -51,6 +51,65 @@ function calculateDamageScore(combo) {
       score += 20000 * multiplier; 
     } else if (spirit === '雷霆震击') {
       score += 0;
+    } else if (spirit === '赤焰天环') {
+      // 1. 基础单次伤害（3,080），带通用等级倍率加成
+      let baseHit = 3080 * multiplier;
+
+      // 2. 3级及以上：额外触发1次（2倍伤害）
+      if (lvl >= 3) {
+        baseHit *= 2;
+      }
+
+      // 3. 计算单次天火激化期间的触发次数
+      // 1~4级：10秒内每2秒1次 = 5次
+      // 5级：间隔变为1.5秒，时间延长至12秒 = 8次
+      let hitsPerIntensify = lvl >= 5 ? 8 : 5;
+      let totalDamagePerIntensify = baseHit * hitsPerIntensify;
+
+      // 4. 计算 4 分钟内天火激化总触发次数（依天火值产出而定）
+      let fireValue = 0;
+      if (spiritCounts['天火陨星']) {
+        const meteorLvl = Math.min(spiritCounts['天火陨星'], 5);
+        if (meteorLvl >= 1) fireValue += 26000;
+        if (meteorLvl >= 3) fireValue += 16000;
+      }
+      const triggerCount = Math.floor(fireValue / 10000);
+
+      // 5. 只有触发了天火激化，赤焰天环才生效
+      score += totalDamagePerIntensify * triggerCount;
+    } else if (spirit === '神火迸发') {
+      // 1. 先计算单次喷发的伤害（结合等级倍率与5级二次喷发）
+      let singleEruption = 65290 * multiplier;
+      if (lvl >= 5) {
+        singleEruption *= 2; // 5级额外造成 1 次伤害
+      }
+
+      // 2. 计算 4 分钟内天火激化的触发次数（目前由天火陨星等产出天火值）
+      let fireValue = 0;
+      if (spiritCounts['天火陨星']) {
+        const meteorLvl = Math.min(spiritCounts['天火陨星'], 5);
+        if (meteorLvl >= 1) fireValue += 26000;
+        if (meteorLvl >= 3) fireValue += 16000;
+      }
+      const triggerCount = Math.floor(fireValue / 10000);
+
+      // 只有触发了天火激化，神火迸发才会跟着喷发
+      score += singleEruption * triggerCount;
+    } else if (spirit === '裂地崩') {
+      // 1. 基础释放伤害（207,708），4分钟树人召唤约 2.5 次
+      let totalDamage = 207708 * multiplier * 2.5;
+
+      // 2. 3级及以上解锁 DOT（30秒内每秒 2887 伤害，单次回响总伤害 86,610）
+      if (lvl >= 3) {
+        totalDamage += 86610 * 2.5;
+      }
+
+      // 3. 5级解锁召唤物攻击提前触发回响（按 4 分钟召唤物攻击频繁触发，约额外结算 20 次回响）
+      if (lvl >= 5) {
+        totalDamage += 2887 * 20;
+      }
+
+      score += totalDamage;
     } else {
       // T3 常规组
       score += 50000 * multiplier; 
@@ -72,29 +131,24 @@ function calcFireIntensify(spiritCounts) {
 
   if (spiritCounts['天火陨星']) {
     const lvl = Math.min(spiritCounts['天火陨星'], 5);
-    
-    // 1级起步：开局 + 每20s一次（4分钟共13次），单次2000天火值 -> 基础 26,000 点
-    if (lvl >= 1) {
-      fireValue += 26000;
-    }
-    
-    // 3级额外加成：10秒内每2秒累加200天火值（单次1000点），4分钟追加约 16,000 点
-    if (lvl >= 3) {
-      fireValue += 16000;
-    }
+    if (lvl >= 1) fireValue += 26000;
+    if (lvl >= 3) fireValue += 16000;
   }
 
-  // TODO: 如果有其他天火灵蕴，在此追加 fireValue += ...
-
-  // 未达到 10000 门槛不触发激化
   if (fireValue < 10000) return 0;
 
-  // 单次天火激化伤害为 195,905
-  // 1级天火陨星（26,000天火值） -> Math.floor(2.6) = 2次激化 (391,810分)
-  // 3级天火陨星（42,000天火值） -> Math.floor(4.2) = 4次激化 (783,620分)
   const triggerCount = Math.floor(fireValue / 10000);
 
-  return triggerCount * 195905;
+  // 基础单次激化伤害 195,905
+  let baseIntensifyDamage = 195905;
+
+  // 神火爆发 3 级及以上：天火激化基础伤害提高 20%
+  if (spiritCounts['神火爆发'] >= 3) {
+    baseIntensifyDamage *= 1.2;
+  }
+  if (spiritCounts['赤焰天环'] >= 5) baseIntensifyDamage *= (8 / 5);
+
+  return triggerCount * baseIntensifyDamage;
 }
 
 // 2. 玄冰激化（动态计算触发次数）

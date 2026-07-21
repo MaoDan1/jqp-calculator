@@ -25,6 +25,7 @@ export const SPIRIT_DICT = {
   '腐木瘴风': { element: '苍木', color: '#a3be8c' },
   '木引青灵': { element: '苍木', color: '#a3be8c' },
   '苍林浮生': { element: '苍木', color: '#a3be8c' }, 
+  '裂地崩':   { element: '苍木', color: '#a3be8c' },
   '五雷珠':   { element: '神雷', color: '#b48ead' },
   '惊雷戟':   { element: '神雷', color: '#b48ead' },
   '雷霆震击': { element: '神雷', color: '#b48ead' },
