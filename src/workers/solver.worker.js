@@ -35,6 +35,8 @@ function calculateDamageScore(combo) {
       else if (lvl === 3) score += 1790000; 
       else if (lvl === 4) score += 2013750;
       else score += 2237500;
+    } else if (spirit === '天火陨星') {
+      score += 26959 * multiplier;
     } else if (spirit === '烈焰焚身') { 
       score += 590000 * multiplier * (lvl >= 3 ? 1.3 : 1) * (lvl >= 5 ? 1.5 : 1);
     } else if (spirit === '霜寒破裂') { 
