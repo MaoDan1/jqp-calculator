@@ -43,6 +43,9 @@ function calculateDamageScore(combo) {
       score += 260000 * multiplier * (lvl >= 3 ? 1.3 : 1) * (lvl >= 5 ? 1.2 : 1);
     } else if (spirit === '烈火燎原') {
       if (activeSkill === '灼灼天炎') score += 470000 * multiplier; 
+    } else if (spirit === '寒潮冰涌') {
+      // 触发频率高，5级与凝冰霜华有额外联动
+      score += 60000 * multiplier * (lvl >= 3 ? 1.2 : 1) * (lvl >= 5 ? 1.3 : 1);
     } else if (spirit === '神木骰') {
       score += 150000 * multiplier;
     } else if (spirit === '五雷珠') {
