@@ -27,7 +27,6 @@ function calculateDamageScore(combo, selectedCards = []) {
       const woodMultiplier = 1 + 0.125 * (lvl - 1);
       score += 712000 * woodMultiplier;
     } else if (spirit === '烈焰焚身') { 
-} else if (spirit === '烈焰焚身') {
       // 1. 基础单层 DOT 伤害（13,000），带通用等级倍率 multiplier
       let singleLayerDamage = 13000 * multiplier;
 
@@ -162,10 +161,8 @@ function calculateDamageScore(combo, selectedCards = []) {
 
   // 4. 丹青绘灵卡牌加成计算
   if (selectedCards && selectedCards.length > 0) {
-    selectedCards.forEach(cardId => {
-      // 可在此根据卡牌属性或费用，向总 score 中叠加对应系数或加成
-      //score += 50000; 
-    });
+    // 直接调用我们写好的硬核计算模型，传入选中的卡牌数组
+    score += calcDanqingDamage(selectedCards, spiritCounts);
   }
 
 
@@ -264,6 +261,228 @@ function calcThunderIntensify(spiritCounts) {
   return triggerCount * 187610;
 }
 
+
+/**
+ * 丹青绘灵伤害计算 (4分钟/240秒 标准单体战斗模型)
+ * @param {Array<string>} cards - 选中的丹青卡牌 ID 数组，如 ['fire_1', 'ice_3']
+ * @returns {number} - 丹青提供的预期总伤害
+ */
+function calcDanqingDamage(cards, spiritCounts = {}) {
+  if (!cards || cards.length === 0) return 0;
+
+  const has = (id) => cards.includes(id);
+  let totalDmg = 0;
+  const combatTime = 240; // 4分钟 = 240秒
+
+  // ==================== 🔥 天火系 (燃烧/爆燃/激化) ====================
+  if (has('fire_1') || has('fire_2') || has('fire_4') || has('fire_5')) {
+    // fire_3 (年兽) 联动：燃烧频率提高20% (3秒缩短至2.5秒)
+    const tickInterval = has('fire_3') ? (3 / 1.2) : 3;
+    
+    let totalBurnTicks = 0;
+    let totalExplosions = 0;
+    let fire1Damage = 0;
+    
+    // 遍历 240 秒内的每一次燃烧 Tick，精准模拟层数期望
+    for (let t = 0; t <= combatTime; t += tickInterval) {
+      // 基础叠加：每 8 秒 1 层 (0秒时默认算第1次叠加)
+      let baseAdditions = Math.floor(t / 8) + 1;
+      
+      // 年兽额外叠加：之前每次燃烧跳伤害时都有 70% 概率额外叠加
+      let bonusAdditions = has('fire_3') ? (totalBurnTicks * 0.7) : 0;
+      
+      // 当前期望层数 (采用小数代表概率期望，最高8层，带年兽十几秒即可满层)
+      let currentStacks = Math.min(8, baseAdditions + bonusAdditions);
+      
+      // 计算当次燃烧伤害
+      let multiplier = 1 + (currentStacks - 1) * 0.05;
+      fire1Damage += 2209 * multiplier;
+      
+      totalBurnTicks++; // 记录实际跳字次数
+    }
+
+    if (has('fire_1')) {
+      totalDmg += fire1Damage;
+    }
+
+    // fire_4 (二尾妖狐)：自身尝试添加或叠加燃烧时立刻造成伤害
+    if (has('fire_4')) {
+      // 基础添加次数：战斗时间 / 8秒 + 1次首发
+      let baseAttempts = Math.floor(combatTime / 8) + 1;
+      // 年兽额外添加次数：燃烧实际触发次数 * 70%
+      let bonusAttempts = has('fire_3') ? (totalBurnTicks * 0.7) : 0;
+      
+      let totalApplyAttempts = baseAttempts + bonusAttempts;
+      totalDmg += totalApplyAttempts * 3960;
+    }
+
+    // fire_5 (六尾魔狐)：6层以上爆燃
+    if (has('fire_5')) {
+      totalExplosions = Math.floor(combatTime / 6);
+      totalDmg += totalExplosions * (5 * 8055);
+    }
+
+    // fire_2 (猛虎) 核心联动：核算天火值与激化伤害
+    if (has('fire_2')) {
+      let tianhuoValue = 0;
+      tianhuoValue += totalBurnTicks * 100;
+      tianhuoValue += totalExplosions * 550;
+
+      const intensifyTriggers = Math.floor(tianhuoValue / 10000);
+      let baseIntensifyDamage = 195905;
+      
+      if (spiritCounts['神火迸发'] >= 3) {
+        baseIntensifyDamage *= 1.2;
+      }
+      if (spiritCounts['赤焰天环'] >= 5) {
+        baseIntensifyDamage *= (8 / 5);
+      }
+      
+      totalDmg += intensifyTriggers * baseIntensifyDamage;
+    }
+  }
+
+  // ==================== ❄️ 玄冰系 (冰箭/风暴/碎裂/激化) ====================
+  if (has('ice_1') || has('ice_2') || has('ice_3') || has('ice_4') || has('ice_5')) {
+    // 左归(ice_4) 和 文敏(ice_3) 的独立增伤乘区
+    const iceMultiplier = 1 + (has('ice_3') ? 0.32 : 0) + (has('ice_4') ? 0.14 : 0);
+
+    // 1. 冰箭次数计算 (燕虹 & 文敏)
+    let totalArrows = has('ice_1') ? Math.floor(combatTime / 6) : 0;
+    if (has('ice_3')) { 
+      totalArrows += Math.floor(combatTime / 14) * 3;
+    }
+
+    // 2. 玄冰风暴次数计算 (齐昊)
+    let stormCasts = 0;
+    if (has('ice_5')) { 
+      stormCasts = Math.floor((combatTime + totalArrows * 2) / 60);
+    }
+
+    // 3. 基础技能伤害核算
+    totalDmg += totalArrows * 5175 * iceMultiplier;
+    totalDmg += stormCasts * 128000 * iceMultiplier;
+
+    // 4. 左归 (ice_4) 碎裂联动
+    let shatterCasts = 0;
+    if (has('ice_4')) {
+      const totalHits = totalArrows + stormCasts; 
+      shatterCasts = totalHits * 0.30; // 计算期望触发的碎裂次数
+      
+      totalDmg += shatterCasts * 8484 * iceMultiplier;
+    }
+
+    // 5. 上官策 (ice_2) 核心联动：核算玄冰值与激化伤害
+    if (has('ice_2')) {
+      let xuanbingValue = 0;
+      
+      // 燕虹和文敏的冰箭：每次 140点
+      xuanbingValue += totalArrows * 140;
+      // 左归的碎裂：每次 140点
+      xuanbingValue += shatterCasts * 140;
+      // 齐昊的风暴：每次 1400点
+      xuanbingValue += stormCasts * 1400;
+
+      // 满 10000 触发一次玄冰激化
+      const intensifyTriggers = Math.floor(xuanbingValue / 10000);
+
+      // 完美对接你的原版玄冰激化单次伤害
+      const baseIceIntensifyDamage = 128861; 
+      
+      // 直接并入丹青总伤
+      totalDmg += intensifyTriggers * baseIceIntensifyDamage;
+    }
+  }
+
+  // ==================== 🌱 苍木系 (脉冲/激化) ====================
+  if (has('wood_1') || has('wood_2') || has('wood_3') || has('wood_4') || has('wood_5')) {
+    // wood_5 (六合镜)：脉冲基础 CD 从 15秒 减为 13秒
+    const baseInterval = has('wood_5') ? 13 : 15;
+    const baseCasts = has('wood_1') ? Math.floor(combatTime / baseInterval) : 0;
+    
+    // wood_4 (林峰) 联动：单体伤害提高 60%
+    const woodMultiplier = 1 + (has('wood_4') ? 0.60 : 0);
+
+    // 精准计算整个 4 分钟内脉冲命中敌人的“真实物理次数” (用于算次数和叠加苍木值)
+    // 来源：折扇基础触发 + 六合镜额外触发(每次基础带2次额外) + 神木骰开局送3次
+    let totalPulseHits = baseCasts;
+    if (has('wood_5')) totalPulseHits += baseCasts * 2;
+    if (has('wood_3')) totalPulseHits += 3;
+
+    // 1. wood_1 (折扇) 基础脉冲伤害
+    if (has('wood_1')) {
+      // 注意：六合镜带来的额外 2 次只有 70% 伤害效能，伤害等效于 1.4 倍
+      const w1EquivalentCasts = baseCasts + (has('wood_5') ? baseCasts * 1.4 : 0);
+      totalDmg += w1EquivalentCasts * 9792 * woodMultiplier;
+    }
+
+    // 2. wood_3 (神木骰) 联动伤害
+    if (has('wood_3')) {
+      // 附加伤害不衰减，完整吃满所有真实脉冲次数
+      totalDmg += totalPulseHits * 12865 * woodMultiplier;
+    }
+
+    // 3. wood_2 (清凉珠) 核心联动：核算苍木值与激化伤害
+    if (has('wood_2')) {
+      // 每次脉冲命中敌人增加 280 点苍木值
+      let cangmuValue = totalPulseHits * 280;
+
+      // 满 10000 触发一次苍木激化
+      const intensifyTriggers = Math.floor(cangmuValue / 10000);
+
+      // 对接图中提取出的原版苍木激化单次伤害
+      const baseWoodIntensifyDamage = 440568; 
+
+      totalDmg += intensifyTriggers * baseWoodIntensifyDamage;
+    }
+  }
+
+  // ==================== ⚡ 神雷系 (连锁闪电/过载/激化) ====================
+  if (has('thunder_1') || has('thunder_2') || has('thunder_3') || has('thunder_4') || has('thunder_5')) {
+    // thunder_1 (引雷幡) 基础闪电 (12秒CD)
+    const baseLightnings = has('thunder_1') ? Math.floor(combatTime / 12) : 0;
+    
+    // thunder_4 (连雷壁) 联动：单体情况，基础提高 45%
+    const thunderMultiplier = 1 + (has('thunder_4') ? 0.45 : 0);
+
+    // thunder_5 (紫电螭吻) 联动：70%概率额外触发1次；每30秒转化为狂雷(等效连续释放 1.8 次)
+    let extraT5Lightnings = 0;
+    if (has('thunder_5')) {
+      extraT5Lightnings += baseLightnings * 0.70;
+      extraT5Lightnings += Math.floor(combatTime / 30) * 1.8;
+    }
+
+    // 记录单体模型下，连锁闪电真实命中敌人的总次数
+    const totalLightnings = baseLightnings + extraT5Lightnings;
+
+    // 1. thunder_1 (引雷幡) 本体伤害
+    if (has('thunder_1')) {
+      totalDmg += totalLightnings * 9660 * thunderMultiplier;
+    }
+
+    // 2. thunder_3 (雷魄晶) 联动：静电过载 (8秒内18404伤害)
+    // 假设覆盖率跟随基础闪电触发频率
+    if (has('thunder_3')) {
+      totalDmg += baseLightnings * 18404 * thunderMultiplier;
+    }
+
+    // 3. thunder_2 (紫霄葫) 核心联动：核算神雷值与激化伤害
+    if (has('thunder_2')) {
+      // 单体模型下，每次连锁闪电命中敌人增加 400 点神雷值
+      let shenleiValue = totalLightnings * 400;
+
+      // 满 10000 触发一次神雷激化
+      const intensifyTriggers = Math.floor(shenleiValue / 10000);
+
+      // 对接图中提取出的原版神雷激化单次伤害
+      const baseThunderIntensifyDamage = 187610; 
+
+      totalDmg += intensifyTriggers * baseThunderIntensifyDamage;
+    }
+  }
+
+  return Math.floor(totalDmg);
+}
 
 
 self.onmessage = function(e) {
