@@ -7,7 +7,7 @@
     <!-- ==================== 终极五列展开布局 ==================== -->
     <div class="main-content">
       
-      <!-- 第 1 列：本套方案所用机巧石 (图1) -->
+      <!-- 第 1 列：本套方案所用机巧石 -->
       <div class="col-used-stones" v-if="allSolutions.length > 0">
         <div class="panel-box">
           <h4 class="panel-title">本套方案所用机巧石 (共 {{ targetStonesCount }} 块)</h4>
@@ -32,8 +32,10 @@
         </div>
       </div>
 
-      <!-- 第 2 列：伤害与属性面板 (图2) -->
+      <!-- 第 2 列：伤害与属性面板 / 智能建议卡片 -->
       <div class="col-stats">
+        
+        <!-- 状态 1：有方案时，正常展示排盘数据 -->
         <div class="panel-box" v-if="allSolutions.length > 0">
           <div class="damage-highlight">
             <span class="dmg-label">🔥 4分钟对单预期总伤 (实战加权榜)</span>
@@ -81,6 +83,36 @@
           </div>
         </div>
         
+        <!-- 状态 2：无完美方案且差1~2块石头，或满石头无解时，展示建议卡片 -->
+        <div class="panel-box" v-else-if="(missingCount > 0 && missingCount <= 2 && !isSolving) || (hasSearched && allSolutions.length === 0)">
+           <div class="suggest-section" style="margin-top: 0; background: transparent; border: none; padding: 0;">
+             <button class="suggest-btn" @click="startSuggesting" :disabled="isSuggesting">
+               {{ isSuggesting ? '正在推演完美拼图组合...' : '💡 寻求完美填满建议' }}
+             </button>
+             
+             <div v-if="suggestResults.length > 0" class="suggest-results" style="margin-top: 20px;">
+               <p style="margin-bottom: 15px; font-size: 14px;">建议添加以下形状：</p>
+               <div class="suggest-tags">
+                 <div v-for="sug in suggestResults" :key="sug.key" class="suggest-tag-visual">
+                   <template v-for="(shape, sIdx) in sug.shapes" :key="sIdx">
+                     <div class="shape-preview suggest-shape" :title="shape.name">
+                       <div class="preview-row" v-for="(row, rIdx) in shape.matrix" :key="rIdx">
+                         <div class="preview-cell" v-for="(val, cIdx) in row" :key="cIdx" :class="{ 'is-solid': val === 1, [shape.id]: val === 1 }"></div>
+                       </div>
+                     </div>
+                     <span v-if="sIdx < sug.shapes.length - 1" class="plus-sign">+</span>
+                   </template>
+                 </div>
+               </div>
+             </div>
+             
+             <div v-else-if="hasSuggested && suggestResults.length === 0" class="suggest-results" style="margin-top: 20px;">
+               <p style="color: #bf616a;">当前即便补充石头也无法完美填满，建议清空一两块重试。</p>
+             </div>
+           </div>
+        </div>
+
+        <!-- 状态 3：刚开始排盘，缺少大量石头时，展示兜底图标 -->
         <div class="empty-details" v-else>
           <div class="empty-icon">📊</div>
           <p>暂无排盘数据</p>
@@ -113,6 +145,7 @@
               {{ isSolving ? searchProgress : (totalStones < targetStonesCount ? `石头不足 (还差 ${targetStonesCount - totalStones} 块)` : '启动核心演算') }}
             </button>
             <p class="limit-note" v-if="totalStones < targetStonesCount">(当前等级需要录入满 {{ targetStonesCount }} 块方可触发自动分析)</p>
+            
           </div>
 
           <div class="solution-nav" v-if="allSolutions.length > 0">
@@ -123,98 +156,130 @@
 
           <div class="no-solution" v-else-if="hasSearched && allSolutions.length === 0">
             <p style="color:#d8dee9; margin-bottom: 5px;">当前背包内的石头无法完美填满 {{ jiqiaopanLevel }} 级异形棋盘。</p>
+            
           </div>
         </div>
       </div>
 
-      <!-- 第 4 列：录入机巧石表单 (图4) -->
-      <div class="col-input">
-        <div class="section-tabs">
+      <!-- 第 4 列：功能卡片管理区 (拉长 Tab + 动态卡片切换) -->
+      <div class="col-management">
+        <!-- 1. 顶部拉长的大 Tab 导航栏 -->
+        <div class="section-tabs full-width-tabs">
           <button :class="{ active: activeTab === 'jiqiao' }" @click="activeTab = 'jiqiao'">✦ 机巧石</button>
           <button :class="{ active: activeTab === 'jiangxin' }" @click="activeTab = 'jiangxin'">❖ 匠心石</button>
+          <button :class="{ active: activeTab === 'danqing' }" @click="activeTab = 'danqing'">❖ 丹青</button>
         </div>
 
-        <div class="panel-box stone-creator">
-          <h4 class="panel-title">录入{{ activeTab === 'jiqiao' ? '机巧石' : '匠心石' }}</h4>
-          
-          <div class="form-grid" v-if="activeTab === 'jiqiao'">
-            <div class="form-group full-width">
-              <label>形状</label>
-              <div class="shape-selector">
-                <div v-for="s in PRESET_SHAPES.filter(s => s.id !== 'shape_C')" :key="s.id" class="shape-option" :class="{ 'active': newJiqiao.shapeId === s.id }" @click="newJiqiao.shapeId = s.id" :title="s.name">
-                  <div class="shape-preview">
-                    <div class="preview-row" v-for="(row, rIdx) in s.matrix" :key="rIdx">
-                      <div class="preview-cell" v-for="(val, cIdx) in row" :key="cIdx" :class="{ 'is-solid': val === 1, [s.id]: val === 1 }"></div>
+        <!-- 2. 当选中 机巧石 或 匠心石 时：左右同级显示【录入卡片】和【列表卡片】 -->
+        <div class="management-grid" v-if="activeTab === 'jiqiao' || activeTab === 'jiangxin'">
+          <!-- 左侧：录入卡片 -->
+          <div class="panel-box stone-creator">
+            <h4 class="panel-title">录入{{ activeTab === 'jiqiao' ? '机巧石' : '匠心石' }}</h4>
+            
+            <!-- 机巧石表单 -->
+            <div class="form-grid" v-if="activeTab === 'jiqiao'">
+              <div class="form-group full-width">
+                <label>形状</label>
+                <div class="shape-selector">
+                  <div v-for="s in PRESET_SHAPES.filter(s => s.id !== 'shape_C')" :key="s.id" class="shape-option" :class="{ 'active': newJiqiao.shapeId === s.id }" @click="newJiqiao.shapeId = s.id" :title="s.name">
+                    <div class="shape-preview">
+                      <div class="preview-row" v-for="(row, rIdx) in s.matrix" :key="rIdx">
+                        <div class="preview-cell" v-for="(val, cIdx) in row" :key="cIdx" :class="{ 'is-solid': val === 1, [s.id]: val === 1 }"></div>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
+              <div class="form-group">
+                <label>共鸣</label>
+                <select v-model="newJiqiao.resonance"><option v-for="r in OPTIONS.resonances" :key="r" :value="r">{{r}}</option></select>
+              </div>
+              <div class="form-group">
+                <label>品级</label>
+                <select v-model="newJiqiao.quality"><option v-for="q in OPTIONS.qualities" :key="q" :value="q">{{q}}</option></select>
+              </div>
+              <div class="form-group">
+                <label>属性</label>
+                <select v-model="newJiqiao.attribute"><option v-for="a in OPTIONS.attributes" :key="a" :value="a">{{a}}</option></select>
+              </div>
+              <div class="form-group">
+                <label>被动灵蕴</label>
+                <select v-model="newJiqiao.spirit"><option v-for="sp in availableSpirits" :key="sp" :value="sp">{{sp}} ({{SPIRIT_DICT[sp].element}})</option></select>
+              </div>
             </div>
-            <div class="form-group">
-              <label>共鸣</label>
-              <select v-model="newJiqiao.resonance"><option v-for="r in OPTIONS.resonances" :key="r" :value="r">{{r}}</option></select>
+
+            <!-- 匠心石表单 -->
+            <div class="form-grid" v-else>
+              <div class="form-group">
+                <label>共鸣 (元素)</label>
+                <select v-model="newJiangxin.resonance"><option v-for="r in OPTIONS.resonances" :key="r" :value="r">{{r}}</option></select>
+              </div>
+              <div class="form-group">
+                <label>品级</label>
+                <select v-model="newJiangxin.quality"><option v-for="q in OPTIONS.qualities" :key="q" :value="q">{{q}}</option></select>
+              </div>
+              <div class="form-group full-width">
+                <label>主动灵蕴技</label>
+                <select v-model="newJiangxin.spiritSkill"><option v-for="sk in availableActiveSkills" :key="sk" :value="sk">{{ sk }} ({{ SPIRIT_SKILL_DICT[sk].element }})</option></select>
+              </div>
             </div>
-            <div class="form-group">
-              <label>品级</label>
-              <select v-model="newJiqiao.quality"><option v-for="q in OPTIONS.qualities" :key="q" :value="q">{{q}}</option></select>
-            </div>
-            <div class="form-group">
-              <label>属性</label>
-              <select v-model="newJiqiao.attribute"><option v-for="a in OPTIONS.attributes" :key="a" :value="a">{{a}}</option></select>
-            </div>
-            <div class="form-group">
-              <label>被动灵蕴</label>
-              <select v-model="newJiqiao.spirit"><option v-for="sp in availableSpirits" :key="sp" :value="sp">{{sp}} ({{SPIRIT_DICT[sp].element}})</option></select>
-            </div>
+
+            <button class="add-btn" @click="addStone">添加到背包</button>
           </div>
 
-          <div class="form-grid" v-else>
-            <div class="form-group">
-              <label>共鸣 (元素)</label>
-              <select v-model="newJiangxin.resonance"><option v-for="r in OPTIONS.resonances" :key="r" :value="r">{{r}}</option></select>
+          <!-- 右侧：机巧石列表卡片 -->
+          <div class="panel-box inventory-list-container">
+            <div class="inventory-header">
+              <h4 class="panel-title" style="border:none; margin:0; padding:0;">机巧石列表</h4>
+              <button class="clear-btn" v-if="inventory.length > 0" @click="clearInventory">清空全部背包</button>
             </div>
-            <div class="form-group">
-              <label>品级</label>
-              <select v-model="newJiangxin.quality"><option v-for="q in OPTIONS.qualities" :key="q" :value="q">{{q}}</option></select>
+            
+            <div class="inventory-list" v-if="displayedInventory.length > 0">
+              <div class="inventory-item" v-for="item in displayedInventory" :key="item.uid">
+                <div class="shape-preview">
+                  <div class="preview-row" v-for="(row, rIdx) in item.matrix" :key="rIdx">
+                    <div class="preview-cell" v-for="(val, cIdx) in row" :key="cIdx" :class="{ 'is-solid': val === 1, [item.shapeId]: val === 1 }"></div>
+                  </div>
+                </div>
+                <div class="item-info">
+                  <div class="tags">
+                    <span class="tag quality" :class="item.quality">{{ item.quality }}</span>
+                    <span class="tag resonance">{{ item.resonance }}</span>
+                    <span class="tag attribute" v-if="item.attribute !== '无'">{{ item.attribute }}</span>
+                    <span class="tag spirit" v-if="item.spirit !== '无'" :style="{ backgroundColor: getSpiritColor(item.spirit, 0.2), color: getSpiritColor(item.spirit, 1) }">{{ item.spirit }}</span>
+                    <span class="tag spirit-skill" v-if="item.spiritSkill && item.spiritSkill !== '无'" :style="{ backgroundColor: getSpiritSkillColor(item.spiritSkill, 0.15), color: getSpiritSkillColor(item.spiritSkill, 1), border: '1px solid ' + getSpiritSkillColor(item.spiritSkill, 0.4) }">技: {{ item.spiritSkill }}</span>
+                  </div>
+                </div>
+                <button class="delete-btn" @click="removeStone(item.uid)">×</button>
+              </div>
             </div>
-            <div class="form-group full-width">
-              <label>主动灵蕴技</label>
-              <select v-model="newJiangxin.spiritSkill"><option v-for="sk in availableActiveSkills" :key="sk" :value="sk">{{ sk }} ({{ SPIRIT_SKILL_DICT[sk].element }})</option></select>
-            </div>
+            <div class="empty-inventory" v-else>当前页签下没有石块。</div>
           </div>
-          <button class="add-btn" @click="addStone">添加到背包</button>
         </div>
-      </div>
 
-      <!-- 第 5 列：机巧石库存列表 (图3) -->
-      <div class="col-inventory">
-        <div class="panel-box inventory-list-container">
-          <div class="inventory-header">
-            <h4 class="panel-title" style="border:none; margin:0; padding:0;">机巧石列表</h4>
-            <button class="clear-btn" v-if="inventory.length > 0" @click="clearInventory">清空全部背包</button>
-          </div>
-          
-          <div class="inventory-list" v-if="displayedInventory.length > 0">
-            <div class="inventory-item" v-for="item in displayedInventory" :key="item.uid">
-              <div class="shape-preview">
-                <div class="preview-row" v-for="(row, rIdx) in item.matrix" :key="rIdx">
-                  <div class="preview-cell" v-for="(val, cIdx) in row" :key="cIdx" :class="{ 'is-solid': val === 1, [item.shapeId]: val === 1 }"></div>
-                </div>
+        <!-- 3. 当选中 丹青 时：替换为宽幅丹青卡牌配置面板 -->
+        <div class="panel-box danqing-full-card" v-else>
+          <h4 class="panel-title">丹青绘灵卡牌激活配置</h4>
+          <div class="danqing-hint">点击勾选/取消卡牌（共 20 张）：</div>
+          <div class="danqing-grid">
+            <div 
+              v-for="card in DANQING_CARDS" 
+              :key="card.id"
+              class="danqing-card-item"
+              :class="{ 'selected': selectedCards.includes(card.id) }"
+              :style="getCardStyle(card)"
+              @click="toggleCard(card.id)"
+            >
+              <div class="card-element" :style="{ color: card.color }">
+                {{ card.element }} · {{ card.cost }}
               </div>
-              <div class="item-info">
-                <div class="tags">
-                  <span class="tag quality" :class="item.quality">{{ item.quality }}</span>
-                  <span class="tag resonance">{{ item.resonance }}</span>
-                  <span class="tag attribute" v-if="item.attribute !== '无'">{{ item.attribute }}</span>
-                  <span class="tag spirit" v-if="item.spirit !== '无'" :style="{ backgroundColor: getSpiritColor(item.spirit, 0.2), color: getSpiritColor(item.spirit, 1) }">{{ item.spirit }}</span>
-                  <span class="tag spirit-skill" v-if="item.spiritSkill && item.spiritSkill !== '无'" :style="{ backgroundColor: getSpiritSkillColor(item.spiritSkill, 0.15), color: getSpiritSkillColor(item.spiritSkill, 1), border: '1px solid ' + getSpiritSkillColor(item.spiritSkill, 0.4) }">技: {{ item.spiritSkill }}</span>
-                </div>
+              <div class="card-name">
+                {{ card.name }}
               </div>
-              <button class="delete-btn" @click="removeStone(item.uid)">×</button>
             </div>
           </div>
-          <div class="empty-inventory" v-else>当前页签下没有石块。</div>
         </div>
+
       </div>
 
     </div>
@@ -224,9 +289,38 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 
-// 【引入模块】：确保你的路径正确
+// 【引入模块】
 import { PRESET_SHAPES, SPIRIT_DICT, SPIRIT_SKILL_DICT, OPTIONS, getSpiritColor, getSpiritSkillColor } from './constants/config.js';
 import SolverWorker from './workers/solver.worker.js?worker'; 
+// 引入卡牌配置
+import { DANQING_CARDS } from './constants/cards.js';
+
+
+
+// 选中的丹青卡牌状态 (本地缓存保存)
+const selectedCards = ref(JSON.parse(localStorage.getItem('jiqiaopan_danqing')) || []);
+
+watch(selectedCards, (newVal) => {
+  localStorage.setItem('jiqiaopan_danqing', JSON.stringify(newVal));
+  triggerAutoSolve(); // 切换卡牌时自动触发重算
+}, { deep: true });
+
+const toggleCard = (cardId) => {
+  if (selectedCards.value.includes(cardId)) {
+    selectedCards.value = selectedCards.value.filter(id => id !== cardId);
+  } else {
+    selectedCards.value.push(cardId);
+  }
+};
+
+const getCardStyle = (card) => {
+  const isSelected = selectedCards.value.includes(card.id);
+  return {
+    borderColor: isSelected ? card.color : '#4c566a',
+    backgroundColor: isSelected ? `${card.color}25` : '#3b4252',
+    boxShadow: isSelected ? `0 0 8px ${card.color}aa` : 'none',
+  };
+};
 
 const jiqiaopanLevel = ref(parseInt(localStorage.getItem('jiqiaopan_level')) || 3);
 const targetStonesCount = computed(() => jiqiaopanLevel.value + 3);
@@ -286,6 +380,108 @@ let calculationWorker = null;
 
 const totalStones = computed(() => inventory.value.length);
 
+
+// ==================== 智能建议系统状态 ====================
+const isSuggesting = ref(false);
+const hasSuggested = ref(false);
+const suggestResults = ref([]);
+
+// 计算当前缺少的石头数量
+const missingCount = computed(() => targetStonesCount.value - totalStones.value);
+
+// 监听背包变动：一旦你修改了石头，重置建议结果
+watch(inventory, () => {
+  hasSuggested.value = false;
+  suggestResults.value = [];
+}, { deep: true });
+
+// 核心建议算法
+const startSuggesting = async () => {
+  isSuggesting.value = true;
+  hasSuggested.value = false;
+  suggestResults.value = [];
+  
+  const testCases = [];
+  const standardShapes = PRESET_SHAPES.filter(s => s.id !== 'shape_C');
+  
+  const createDummy = (shape) => ({ 
+    uid: `dummy-${Date.now()}-${Math.random()}`, 
+    shapeId: shape.id, 
+    name: shape.name, 
+    matrix: shape.matrix, 
+    rotations: getUniqueRotations(shape.matrix), 
+    resonance: '无', quality: '凡品', attribute: '无', spirit: '无', spiritSkill: '无' 
+  });
+
+  if (missingCount.value === 1) {
+    // 差1块
+    standardShapes.forEach(s1 => {
+      // 【修改】：保存整个 shape 对象，而不只是 name
+      testCases.push({ addedShapes: [s1], inventory: [...inventory.value, createDummy(s1)] });
+    });
+  } else if (missingCount.value === 2) {
+    // 差2块
+    for (let i = 0; i < standardShapes.length; i++) {
+      for (let j = i; j < standardShapes.length; j++) {
+        testCases.push({
+          // 【修改】：保存两个 shape 对象
+          addedShapes: [standardShapes[i], standardShapes[j]],
+          inventory: [...inventory.value, createDummy(standardShapes[i]), createDummy(standardShapes[j])]
+        });
+      }
+    }
+  } else if (missingCount.value === 0) {
+    // 满了但无解
+    standardShapes.forEach(s1 => {
+      testCases.push({ 
+        addedShapes: [s1], 
+        inventory: [...inventory.value, createDummy(s1)] 
+      });
+    });
+  }
+
+  const sortedValidCells = [...validCells.value].sort((a, b) => a[0] !== b[0] ? a[0] - b[0] : a[1] - b[1]);
+  const foundSuggestions = [];
+  const concurrency = 4;
+
+  for (let i = 0; i < testCases.length; i += concurrency) {
+    const batch = testCases.slice(i, i + concurrency);
+    const results = await Promise.all(batch.map(tc => {
+      return new Promise((resolve) => {
+        const tempWorker = new SolverWorker();
+        tempWorker.onmessage = (e) => {
+          if (e.data.type === 'done') {
+            tempWorker.terminate();
+            resolve({ success: e.data.results && e.data.results.length > 0, testCase: tc });
+          }
+        };
+        tempWorker.postMessage({
+          inventory: JSON.parse(JSON.stringify(tc.inventory)),
+          target: targetStonesCount.value,
+          validCells: sortedValidCells,
+          selectedCards: []
+        });
+      });
+    }));
+
+    results.forEach(res => {
+      if (res.success) {
+        // 【修改】：使用 ID 拼接作为去重 Key，将图形数组存入结果中
+        const shapes = res.testCase.addedShapes;
+        const sugKey = shapes.map(s => s.id).sort().join('+');
+        
+        if (!foundSuggestions.some(item => item.key === sugKey)) {
+          foundSuggestions.push({ key: sugKey, shapes: shapes });
+        }
+      }
+    });
+  }
+
+  suggestResults.value = foundSuggestions;
+  isSuggesting.value = false;
+  hasSuggested.value = true;
+};
+
 const currentBoardView = computed(() => {
   if (allSolutions.value.length === 0) {
     const emptyBoard = Array.from({ length: 7 }, () => Array(6).fill(-1));
@@ -296,19 +492,13 @@ const currentBoardView = computed(() => {
 });
 
 const currentExpectedDamage = computed(() => allSolutions.value.length === 0 ? 0 : allSolutions.value[currentSolutionIndex.value].damage);
-// 替换为带有置顶排序逻辑的新代码：
+
 const currentSolutionStones = computed(() => {
   if (allSolutions.value.length === 0) return [];
-  
-  // 浅拷贝一份数组进行排序，避免修改原始数据
   const stones = [...allSolutions.value[currentSolutionIndex.value].stones];
-  
   return stones.sort((a, b) => {
-    // 如果 a 是匠心石，把它排在前面
     if (a.shapeId === 'shape_C' && b.shapeId !== 'shape_C') return -1;
-    // 如果 b 是匠心石，把它排在前面
     if (b.shapeId === 'shape_C' && a.shapeId !== 'shape_C') return 1;
-    // 其他机巧石保持原有顺序
     return 0; 
   });
 });
@@ -370,7 +560,7 @@ const addStone = () => {
   if (activeTab.value === 'jiqiao') {
     const shapeInfo = PRESET_SHAPES.find(s => s.id === newJiqiao.value.shapeId);
     inventory.value.push({ uid: `${shapeInfo.id}-${globalStoneId++}`, shapeId: shapeInfo.id, name: shapeInfo.name, matrix: shapeInfo.matrix, rotations: getUniqueRotations(shapeInfo.matrix), resonance: newJiqiao.value.resonance, quality: newJiqiao.value.quality, attribute: newJiqiao.value.attribute, spirit: newJiqiao.value.spirit, spiritSkill: '无' });
-  } else {
+  } else if (activeTab.value === 'jiangxin') {
     const shapeInfo = PRESET_SHAPES.find(s => s.id === 'shape_C');
     inventory.value.push({ uid: `${shapeInfo.id}-${globalStoneId++}`, shapeId: shapeInfo.id, name: shapeInfo.name, matrix: shapeInfo.matrix, rotations: getUniqueRotations(shapeInfo.matrix), resonance: newJiangxin.value.resonance, quality: newJiangxin.value.quality, attribute: '无', spirit: '无', spiritSkill: newJiangxin.value.spiritSkill });
   }
@@ -405,20 +595,14 @@ const getCellStyle = (cellVal, r, c) => {
   };
 };
 
-// 【新增】：根据格子内的 UID 获取悬停提示文本
 const getStoneTooltip = (cellVal) => {
-  // 如果是空位(-1)或者未填入石头的格子(0)，不显示任何提示
   if (cellVal === -1 || cellVal === 0) return '';
-  
-  // 从当前已拼好的石头列表中，找到对应 uid 的那块石头
   const stone = currentSolutionStones.value.find(s => s.uid === cellVal);
   if (!stone) return '';
 
-  // 区分匠心石和普通机巧石的提示文案
   if (stone.shapeId === 'shape_C') {
     return `[匠心石] ${stone.resonance} · ${stone.quality}\n主动技能：${stone.spiritSkill}`;
   } else {
-    // 灵活展示，如果没有被动灵蕴则显示为"无"
     const spiritText = stone.spirit === '无' ? '无' : stone.spirit;
     return `[机巧石] ${stone.resonance} · ${stone.quality} · ${stone.attribute}\n被动灵蕴：${spiritText}`;
   }
@@ -458,10 +642,12 @@ const startSolving = () => {
     }
   };
 
+  // 【核心重点】：将选中的 selectedCards 传给 Worker
   calculationWorker.postMessage({
     inventory: JSON.parse(JSON.stringify(inventory.value)),
     target: targetStonesCount.value,
-    validCells: sortedValidCells
+    validCells: sortedValidCells,
+    selectedCards: JSON.parse(JSON.stringify(selectedCards.value))
   });
 };
 
@@ -469,260 +655,15 @@ onMounted(() => { if (inventory.value.length >= targetStonesCount.value) startSo
 onUnmounted(() => { if (calculationWorker) calculationWorker.terminate(); });
 </script>
 
-<style scoped>
-/* ==================== 5列宽屏布局与全套美化 CSS ==================== */
+<style scoped src="./assets/app.css"></style>
 
-.jiqiaopan-container { 
-  font-family: 'Helvetica Neue', Arial, sans-serif; 
-  /* 放开容器宽度，支撑5列并排 */
-  max-width: 1750px; 
-  margin: 0 auto; 
-  padding: 20px; 
-  color: #e5e9f0; 
-}
-
-.header { text-align: center; margin-bottom: 30px; border-bottom: 1px solid #3b4252; padding-bottom: 10px; }
-.header h2 { margin: 0 0 10px 0; color: #d8dee9; }
-
-/* 核心 Flex 展开布局 */
-.main-content { 
-  display: flex; 
-  gap: 20px; 
-  align-items: flex-start; 
-  justify-content: center; 
-  flex-wrap: wrap; /* 屏幕不够宽时允许优雅换行 */
-}
-
-/* 定义每一列的最佳定宽 */
-.col-used-stones { width: 280px; flex-shrink: 0; }
-.col-stats { width: 320px; flex-shrink: 0; }
-.col-board { width: 340px; flex-shrink: 0; }
-.col-input { width: 300px; flex-shrink: 0; }
-.col-inventory { width: 320px; flex-shrink: 0; }
-
-/* 统一面板风格 */
-.panel-box {
-  background-color: #2e3440;
-  padding: 15px;
-  border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-  margin-bottom: 15px;
-}
-.panel-title { margin: 0 0 15px 0; font-size: 15px; color: #eceff4; border-bottom: 1px solid #4c566a; padding-bottom: 8px; }
-.sub-title { margin: 15px 0 10px 0; font-size: 14px; color: #eceff4; border-bottom: 1px dashed #4c566a; padding-bottom: 5px; }
-.sub-title:first-child { margin-top: 0; }
-
-/* 第 1 列：方案石头 */
-.used-stones-list { display: flex; flex-direction: column; gap: 8px; }
-.used-stone-item { display: flex; align-items: center; gap: 10px; background: #3b4252; padding: 10px; border-radius: 6px; border-left: 3px solid #4c566a;}
-/* 【修复】：给左侧方案列表的形状框设定死宽度 56px，防止一字型挤压右侧 */
-.used-shape-badge { 
-  background: #2e3440; 
-  border-radius: 4px; 
-  display: flex; 
-  align-items: center; 
-  justify-content: center; 
-  width: 56px;         /* 强制固定宽度 */
-  height: 44px;        /* 强制固定高度 */
-  flex-shrink: 0;      /* 绝对不允许被挤压 */
-}
-
-/* 第 2 列：伤害与属性 */
-.empty-details { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 500px; border: 2px dashed #4c566a; border-radius: 8px; background-color: rgba(46, 52, 64, 0.3); text-align: center; }
-.empty-icon { font-size: 40px; margin-bottom: 10px; opacity: 0.5; }
-.empty-details p { color: #d8dee9; font-weight: bold; margin: 0 0 5px 0; }
-.empty-sub { font-size: 12px; color: #4c566a; line-height: 1.5; }
-.damage-highlight { background: linear-gradient(135deg, rgba(208, 135, 112, 0.15), rgba(191, 97, 106, 0.15)); border: 1px solid rgba(208, 135, 112, 0.5); border-radius: 8px; padding: 15px; text-align: center; margin-bottom: 15px; }
-.dmg-label { display: block; color: #ebcb8b; font-size: 12px; font-weight: bold; margin-bottom: 8px; }
-.dmg-value { font-size: 28px; font-weight: bold; color: #eceff4; text-shadow: 0 2px 4px rgba(0,0,0,0.5);}
-.stats-panel { display: flex; flex-direction: column; gap: 10px; }
-.spirit-list { display: flex; flex-direction: column; gap: 8px; }
-.spirit-item { display: flex; justify-content: space-between; align-items: center; background: #3b4252; padding: 8px 12px; border-radius: 4px; border-left: 4px solid transparent; }
-.spirit-name { font-weight: bold; font-size: 13px; }
-.level-info { display: flex; align-items: baseline; gap: 4px; }
-.spirit-level { font-size: 15px; font-weight: bold; color: #eceff4; }
-.max-level { font-size: 12px; color: #4c566a; }
-.overflow-warn { font-size: 12px; color: #bf616a; margin-left: 5px;}
-.stat-value { font-size: 12px; color: #8fbcbb; margin-left: 8px; background: rgba(143, 188, 187, 0.15); padding: 2px 6px; border-radius: 4px;}
-.empty-stats { font-size: 12px; color: #4c566a; font-style: italic; }
-
-/* 第 3 列：中心棋盘 */
-.level-control { margin-bottom: 15px; display: flex; align-items: center; justify-content: center; gap: 10px; background: #2e3440; padding: 10px 15px; border-radius: 8px; border: 1px solid #4c566a; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-.level-control label { color: #ebcb8b; font-weight: bold; font-size: 15px;}
-.level-control select { padding: 6px 12px; background: #3b4252; color: #eceff4; border: 1px solid #4c566a; border-radius: 4px; outline: none; font-size: 14px; cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23eceff4' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e"); background-repeat: no-repeat; background-position: right 8px center; background-size: 14px; padding-right: 30px; }
-.level-control select:hover { border-color: #88c0d0; }
-.board-container { display: flex; justify-content: center; margin-bottom: 20px;}
-.board { display: flex; flex-direction: column; background-color: transparent; padding: 4px; }
-.board-row { display: flex; }
-.board-cell { width: 48px; height: 48px; box-sizing: border-box; }
-.controls { width: 100%; text-align: center; }
-.status-panel p { margin: 0 0 10px 0; font-size: 14px;}
-.limit-note { font-size: 12px; color: #4c566a; margin-top: 5px; }
-.solve-btn { width: 100%; padding: 14px; background-color: #88c0d0; color: #2e3440; font-size: 15px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 6px rgba(0,0,0,0.2);}
-.solve-btn:hover:not(:disabled) { background-color: #8fbcbb; transform: translateY(-1px); }
-.solve-btn:disabled { background-color: #4c566a; color: #ebcb8b; cursor: not-allowed; box-shadow: none;}
-.solution-nav { margin-top: 15px; display: flex; justify-content: space-between; align-items: center; background-color: #2e3440; padding: 10px 15px; border-radius: 6px; }
-.solution-nav button { background: #434c5e; color: #eceff4; border: 1px solid #4c566a; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; transition: all 0.2s; }
-.solution-nav button:hover:not(:disabled) { background: #4c566a; border-color: #88c0d0; color: #88c0d0; }
-.solution-nav button:disabled { background: #3b4252; color: #4c566a; border-color: transparent; cursor: not-allowed; opacity: 0.7; }
-.solution-count { font-size: 14px; color: #a3be8c; font-weight: bold;}
-.no-solution { margin-top: 15px; background: #2e3440; padding: 15px; border-radius: 6px;}
-
-/* 第 4 列：录入与页签 */
-.section-tabs { display: flex; background: #2e3440; border-radius: 8px; overflow: hidden; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-.section-tabs button { flex: 1; background: transparent; border: none; color: #8fbcbb; padding: 14px; font-size: 15px; font-weight: bold; cursor: pointer; transition: all 0.2s; border-bottom: 3px solid transparent; }
-.section-tabs button:hover { background: #3b4252; }
-.section-tabs button.active { background: #3b4252; color: #ebcb8b; border-bottom: 3px solid #ebcb8b; }
-/* 【修复】：把按钮之间的间距稍微收拢一点 */
-.shape-selector { 
-  display: flex; 
-  gap: 5px; 
-  justify-content: space-between; 
-}
-
-.shape-option { 
-  flex: 1; 
-  display: flex; 
-  justify-content: center; 
-  align-items: center; 
-  background-color: #3b4252; 
-  border: 2px solid #4c566a; 
-  border-radius: 6px; 
-  padding: 6px 0; /* 稍微调小上下内边距 */
-  cursor: pointer; 
-  transition: all 0.2s; 
-}
-
-.shape-option:hover { background-color: #434c5e; border-color: #8fbcbb; }
-.shape-option.active { background-color: #4c566a; border-color: #eceff4; box-shadow: 0 0 8px rgba(236, 239, 244, 0.3); }
-/* 【关键修复】：解除表单中图标的死宽度，并整体缩小 85%，让它们乖乖待在框里 */
-.shape-selector .shape-preview {
-  width: auto;
-  flex-shrink: 1;
-  transform: scale(0.85); 
-}
-.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px; }
-.form-group { display: flex; flex-direction: column; gap: 5px; }
-.form-group.full-width { grid-column: span 2; }
-.form-group label { font-size: 12px; color: #d8dee9; }
-.form-group select { padding: 8px 12px; background-color: #3b4252; color: #eceff4; border: 1px solid #4c566a; border-radius: 4px; outline: none; cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23eceff4' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e"); background-repeat: no-repeat; background-position: right 8px center; background-size: 14px; transition: all 0.2s; }
-.form-group select:hover, .form-group select:focus { border-color: #88c0d0; }
-.add-btn { width: 100%; padding: 12px; background-color: #a3be8c; color: #2e3440; font-size: 14px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: all 0.2s;}
-.add-btn:hover { background-color: #8fbcbb; transform: translateY(-1px);}
-
-/* 第 5 列：背包列表 */
-.inventory-list-container { flex: 1; height: 500px; display: flex; flex-direction: column; }
-.inventory-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-.clear-btn { background: transparent; color: #bf616a; border: 1px solid #bf616a; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; transition: all 0.2s; }
-.clear-btn:hover { background: #bf616a; color: #eceff4; }
-/* 【修复】：把原来的 padding-right: 5px 改大，给右侧的滚动条留出充足的空间 */
-.inventory-list { 
-  display: flex; 
-  flex-direction: column; 
-  gap: 10px; 
-  overflow-y: auto; 
-  padding-right: 15px; /* 这里加宽到了 15px */
-  flex: 1;
-}
-.inventory-item { display: flex; align-items: center; background-color: #3b4252; padding: 10px; border-radius: 6px; position: relative; border-left: 3px solid #434c5e; transition: all 0.2s; }
-.inventory-item:hover { background-color: #434c5e; border-left-color: #88c0d0; }
-
-/* 通用组件渲染 */
-/* 【修复】：给右侧背包列表及其他地方的形状预览也设定死宽度 */
-.shape-preview { 
-  display: flex; 
-  flex-direction: column; 
-  align-items: center; 
-  justify-content: center;
-  width: 56px;         /* 容纳 4*12px = 48px 的一字型游刃有余 */
-  flex-shrink: 0; 
-}
-.preview-row { display: flex; }
-.preview-cell { width: 12px; height: 12px; }
-.item-info { margin-left: 15px; flex: 1; }
-.tags { display: flex; flex-wrap: wrap; gap: 5px; }
-.tag { font-size: 11px; padding: 2px 6px; border-radius: 3px; font-weight: bold;}
-.tag.quality { background-color: #4c566a; color: #eceff4; }
-.tag.quality.凡品 { color: #d8dee9; }
-.tag.quality.良品 { color: #a3be8c; }
-.tag.quality.珍品 { color: #b48ead; }
-.tag.quality.灵品 { color: #ebcb8b; }
-.tag.resonance { background-color: #434c5e; color: #eceff4; }
-.tag.attribute { background-color: #434c5e; color: #eceff4; }
-.delete-btn { position: absolute; right: 10px; top: 10px; width: 24px; height: 24px; background: #bf616a; color: white; border: none; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; transition: all 0.2s;}
-.delete-btn:hover { background-color: #d08770; transform: scale(1.1); }
-.empty-inventory { text-align: center; color: #4c566a; padding: 20px 0; font-size: 13px;}
-
-/* 颜色 */
-.shape_I { background-color: #88c0d0; } .shape_O { background-color: #ebcb8b; } .shape_T { background-color: #b48ead; } .shape_L { background-color: #d08770; } .shape_J { background-color: #5e81ac; } .shape_C { background-color: #ebcb8b; border: 1px solid #d08770; } 
-::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: #2e3440; border-radius: 3px;} ::-webkit-scrollbar-thumb { background: #4c566a; border-radius: 3px; } ::-webkit-scrollbar-thumb:hover { background: #434c5e; }
-
-/* ==================== 棋盘悬浮提示框 (Tooltip) 美化 ==================== */
-
-/* 1. 确保格子本身可以作为定位锚点，并且悬停时层级最高，防止被旁边格子挡住 */
-.board-cell { 
-  width: 48px; 
-  height: 48px; 
-  box-sizing: border-box; 
-  position: relative; 
-}
-.board-cell:hover {
-  z-index: 50; 
-}
-
-/* 2. 提示框的主体 (背景、文字、边框、阴影) */
-.board-cell[data-tooltip]:not([data-tooltip=""]):hover::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  bottom: calc(100% + 10px); /* 悬浮在格子正上方 */
-  left: 50%;
-  transform: translateX(-50%);
-  background-color: #2e3440;
-  color: #eceff4;
-  padding: 8px 12px;
-  border-radius: 6px;
-  border: 1px solid #4c566a;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-  white-space: pre-wrap; /* 允许文本中的 \n 正常换行 */
-  font-size: 13px;
-  line-height: 1.6;
-  z-index: 100;
-  width: max-content;
-  pointer-events: none; /* 防止鼠标移上去时提示框闪烁 */
-}
-
-/* 3. 提示框底部的小三角指针 */
-.board-cell[data-tooltip]:not([data-tooltip=""]):hover::before {
-  content: '';
-  position: absolute;
-  bottom: calc(100% + 5px);
-  left: 50%;
-  transform: translateX(-50%) rotate(45deg);
-  width: 10px;
-  height: 10px;
-  background-color: #2e3440;
-  border-bottom: 1px solid #4c566a;
-  border-right: 1px solid #4c566a;
-  z-index: 101;
-  pointer-events: none;
-}
-
-
-</style>
-
-
-
-<!-- ==================== 【终极修复】全局背景色 ==================== -->
-<!-- 去掉 scoped 属性，这部分样式将直接强行覆盖浏览器默认的 html 和 body 白色底色 -->
 <style>
 html, body {
   margin: 0;
   padding: 0;
-  background-color: #1a1c23; /* 赛博修仙深色背景 */
+  background-color: #1a1c23; 
   color: #e5e9f0;
-  /* 平滑滚动体验 */
   scroll-behavior: smooth;
-  /* 防止不同浏览器滚动条挤压页面宽度 */
   overflow-x: hidden;
 }
 </style>

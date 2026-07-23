@@ -1,6 +1,6 @@
 // src/workers/solver.worker.js
 
-function calculateDamageScore(combo) {
+function calculateDamageScore(combo, selectedCards = []) {
   let score = 1083333; 
   const spiritCounts = {};
   let activeSkill = '无';
@@ -24,13 +24,33 @@ function calculateDamageScore(combo) {
     const multiplier = 1 + 0.375 * (lvl - 1); 
 
     if (spirit === '苍林浮生') {
-      if (lvl === 1) score += 712000;
-      else if (lvl === 2) score += 801000; 
-      else if (lvl === 3) score += 1790000; 
-      else if (lvl === 4) score += 2013750;
-      else score += 2237500;
+      const woodMultiplier = 1 + 0.125 * (lvl - 1);
+      score += 712000 * woodMultiplier;
     } else if (spirit === '烈焰焚身') { 
-      score += 590000 * multiplier * (lvl >= 3 ? 1.3 : 1) * (lvl >= 5 ? 1.5 : 1);
+} else if (spirit === '烈焰焚身') {
+      // 1. 基础单层 DOT 伤害（13,000），带通用等级倍率 multiplier
+      let singleLayerDamage = 13000 * multiplier;
+
+      // 2. 3 级与 5 级的机制质变加成（直接作用于 DOT 伤害）
+      if (lvl >= 3) singleLayerDamage *= 1.3;
+      if (lvl >= 5) singleLayerDamage *= 1.5;
+
+      // 3. 单目标打桩场景：固定 3 层【焚尽】
+      const burnStacks = 3; 
+
+      // 4. 4 分钟（240 秒）打桩触发次数：240s / 15s = 16 次
+      const burnTickCount = 16; 
+
+      // 5. 最终总得分 = 单层伤害 × 3层 × 16次
+      let totalBurnDamage = singleLayerDamage * burnStacks * burnTickCount;
+
+      // 4. 【新增】：5 级烈焰焚身 + 主动技能【灼灼天炎】联动
+      // 4 分钟按释放 2.5 次灼灼天炎计算，每次瞬间赋予 12 层焚尽
+      if (lvl >= 5 && activeSkill === '灼灼天炎') {
+      totalBurnDamage += singleLayerDamage * 12 * 2.5;
+      }
+      // 5. 计入总得分
+      score += totalBurnDamage;
     } else if (spirit === '霜寒破裂') { 
       score += 300000 * multiplier * (lvl >= 3 ? 1.5 : 1) * (lvl >= 5 ? 1.2 : 1);
     } else if (spirit === '寒晶刺') { 
@@ -116,11 +136,22 @@ function calculateDamageScore(combo) {
     }
   }
 
-// 3. 叠加四元素激化得分
+
+
+  // 3. 叠加四元素激化得分
   score += calcFireIntensify(spiritCounts);
   score += calcIceIntensify(spiritCounts);
   score += calcWoodIntensify(spiritCounts, activeSkill); // <-- 传入 activeSkill
   score += calcThunderIntensify(spiritCounts);
+
+  // 4. 丹青绘灵卡牌加成计算
+  if (selectedCards && selectedCards.length > 0) {
+    selectedCards.forEach(cardId => {
+      // 可在此根据卡牌属性或费用，向总 score 中叠加对应系数或加成
+      //score += 50000; 
+    });
+  }
+
 
   return Math.floor(score);
 }
@@ -142,8 +173,8 @@ function calcFireIntensify(spiritCounts) {
   // 基础单次激化伤害 195,905
   let baseIntensifyDamage = 195905;
 
-  // 神火爆发 3 级及以上：天火激化基础伤害提高 20%
-  if (spiritCounts['神火爆发'] >= 3) {
+  // 神火迸发 3 级及以上：天火激化基础伤害提高 20%
+  if (spiritCounts['神火迸发'] >= 3) {
     baseIntensifyDamage *= 1.2;
   }
   if (spiritCounts['赤焰天环'] >= 5) baseIntensifyDamage *= (8 / 5);
@@ -178,8 +209,8 @@ function calcWoodIntensify(spiritCounts, activeSkill) {
   // 1. 苍林浮生贡献苍木值（3级及以上 4分钟产出约 15000）
   if (spiritCounts['苍林浮生']) {
     const lvl = Math.min(spiritCounts['苍林浮生'], 5);
-    if (lvl >= 3) {
-      woodValue += 15000;
+    if (lvl >= 5) {
+      woodValue += 11000;
     }
   }
 
@@ -223,6 +254,8 @@ self.onmessage = function(e) {
   const inventory = e.data.inventory;
   const target = e.data.target;
   const validCells = e.data.validCells;
+// 1. 获取主线程传过来的 selectedCards (如果没有传则默认为空数组 [])
+  const selectedCards = e.data.selectedCards || [];
 
   const cellMap = {};
   for(let i=0; i<validCells.length; i++) {
@@ -247,7 +280,7 @@ self.onmessage = function(e) {
   getCombos(0);
 
   for(let i=0; i<combinations.length; i++) {
-    combinations[i]._score = calculateDamageScore(combinations[i]);
+    combinations[i]._score = calculateDamageScore(combinations[i], selectedCards);
   }
   combinations.sort(function(a, b) { return b._score - a._score; });
 
