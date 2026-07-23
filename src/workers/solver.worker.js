@@ -62,7 +62,23 @@ function calculateDamageScore(combo, selectedCards = []) {
       if (lvl >= 3) spiritScore += 427360; // 3级及以上DOT收益
       score += spiritScore;
     } else if (spirit === '寒潮冰涌') {
-      score += 60000 * multiplier * (lvl >= 3 ? 1.2 : 1) * (lvl >= 5 ? 1.3 : 1);
+      // 1. 基础单次伤害
+      const baseDamage = 38144;
+      
+      // 2. 专属等级伤害倍率：1级为1，之后每级提升 37.5%
+      const levelMultiplier = 1 + (lvl - 1) * 0.375;
+      
+      // 3. 计算 4 分钟 (240秒) 内的触发次数
+      // 1~2级 CD 30秒 (9次)，3级及以上 CD 20秒 (13次)
+      let casts = lvl >= 3 ? 13 : 9; 
+      
+      // 4. 5级联动机制
+      if (lvl >= 5 && activeSkill === '凝冰霜华') {
+        // 凝冰霜华持续期间放4道，按4分钟放2.5次大招计算，额外触发 10 次
+        casts += 10; 
+      }
+      // 5. 汇总得分并乘上全局 multiplier
+      score += baseDamage * levelMultiplier * casts * multiplier;
     } else if (spirit === '神木骰') {
       score += 150000 * multiplier;
     } else if (spirit === '五雷珠') {
