@@ -1,7 +1,8 @@
 // src/workers/solver.worker.js
 
 function calculateDamageScore(combo, selectedCards = []) {
-  let score = 1083333; 
+  // 1. 移除虚假打底伤害，从 0 开始纯净计算
+  let score = 0; 
   const spiritCounts = {};
   let activeSkill = '无';
   
@@ -11,11 +12,7 @@ function calculateDamageScore(combo, selectedCards = []) {
     if (stone.spiritSkill && stone.spiritSkill !== '无') activeSkill = stone.spiritSkill;
   }
 
-  // 1. 主动灵蕴技基础得分
-  if (activeSkill === '灼灼天炎') score += 100000;
-  else if (activeSkill === '凝冰霜华') score += 133333;
-  else if (activeSkill === '青芜浮生') score += 200000;
-  else if (activeSkill === '雷佑灵光') score += 150000;
+  // (移除了主动技能的硬编码送分，因为大招本身的收益应该体现在它触发的机巧石联动里)
 
   // 2. 被动灵蕴基础得分计算
   for (const spirit in spiritCounts) {
@@ -23,281 +20,192 @@ function calculateDamageScore(combo, selectedCards = []) {
     const lvl = count > 5 ? 5 : count;
     const multiplier = 1 + 0.375 * (lvl - 1); 
 
-    // ==================== 🌟 新增：全局机巧石联动动态乘区 ====================
+    // ==================== 🌟 动态全局乘区计算 ====================
     let dynamicGlobalMultiplier = 1.0;
 
     // 【烈火燎原】5级联动：灼灼天炎使所有灵蕴伤害提高 33%，持续 15 秒
     if (spiritCounts['烈火燎原'] >= 5 && activeSkill === '灼灼天炎') {
-      // 按照 4 分钟 (240秒) 释放 2.5 次主动技能计算
       const triggerCount = 2.5; 
-      // 计算 15 秒增伤 buff 在全局战斗中的覆盖率期望
       const buffUptime = Math.min(1, (15 * triggerCount) / 240); 
-      // 转化为全局伤害乘区期望 (33% * 覆盖率，约 5.15% 全程提升)
       dynamicGlobalMultiplier += (0.33 * buffUptime);
     }
 
+    // ========== 机巧石独立伤害核算 ==========
     if (spirit === '苍林浮生') {
-      const woodMultiplier = 1 + 0.125 * (lvl - 1);
-      score += 712000 * woodMultiplier;
-    } else if (spirit === '烈焰焚身') { 
-      // 1. 基础单层 DOT 伤害（13,000），带通用等级倍率 multiplier
-      let singleLayerDamage = 13000 * multiplier;
+      const summonCount = Math.floor(240 / 20);
+      let damagePerSummon = 0;
+      let levelMultiplier = 1;
 
-      // 2. 3 级与 5 级的机制质变加成（直接作用于 DOT 伤害）
+      if (lvl < 3) {
+        damagePerSummon = 10022 * 6; 
+        levelMultiplier = 1 + 0.125 * (lvl - 1);
+      } else {
+        damagePerSummon = 145000;
+        levelMultiplier = 1.25; 
+        if (lvl > 3) {
+          levelMultiplier += 0.135 * (lvl - 3);
+        }
+      }
+      
+      let totalDamage = damagePerSummon * summonCount * levelMultiplier;
+      score += totalDamage * dynamicGlobalMultiplier; 
+      // 修改点：直接乘刚刚计算的全局动态乘区 dynamicGlobalMultiplier (这里修正了原代码中未生效的bug)
+
+    } else if (spirit === '烈焰焚身') { 
+      let singleLayerDamage = 13000 * multiplier;
+      
+      // 3 级与 5 级的机制质变加成（直接作用于 DOT 伤害）
       if (lvl >= 3) singleLayerDamage *= 1.3;
       if (lvl >= 5) singleLayerDamage *= 1.5;
 
-      // 3. 单目标打桩场景：固定 3 层【焚尽】
+      // 单目标打桩场景：固定 3 层【焚尽】，每 15 秒 1 跳
       const burnStacks = 3; 
-
-      // 4. 4 分钟（240 秒）打桩触发次数：240s / 15s = 16 次
       const burnTickCount = 16; 
-
-      // 5. 最终总得分 = 单层伤害 × 3层 × 16次
       let totalBurnDamage = singleLayerDamage * burnStacks * burnTickCount;
 
-      // 4. 【新增】：5 级烈焰焚身 + 主动技能【灼灼天炎】联动
-      // 4 分钟按释放 2.5 次灼灼天炎计算，每次瞬间赋予 12 层焚尽
+      // 5 级联动：主动技能【灼灼天炎】
       if (lvl >= 5 && activeSkill === '灼灼天炎') {
-      totalBurnDamage += singleLayerDamage * 12 * 2.5;
+        totalBurnDamage += singleLayerDamage * 12 * 2.5;
       }
-      // 5. 计入总得分
-      score += totalBurnDamage;
+
+      // ==================== 🌟 新增：六尾魔狐 (fire_5) 跨模块联动 ====================
+      // 3 级质变：六尾魔狐每次触发爆燃，额外添加 2 层烈焰焚身效果
+      if (lvl >= 3 && selectedCards && selectedCards.includes('fire_5')) {
+        // 同步 calcDanqingDamage 中的爆燃频率（240秒 / 6 = 40次）
+        const totalExplosions = Math.floor(240 / 6); 
+        // 40 次爆燃 × 每次 2 层
+        totalBurnDamage += singleLayerDamage * 2 * totalExplosions;
+      }
+
+      score += totalBurnDamage * dynamicGlobalMultiplier;
     } else if (spirit === '霜寒破裂') { 
-      // 1. 基础单次破裂伤害
       const baseDamage = 60632;
-      
-      // 2. 专属等级伤害倍率：1级为1，之后每级提升 37.5%
       const levelMultiplier = 1 + (lvl - 1) * 0.375;
-      
-      // 3. 计算 4 分钟 (240秒) 内【冰霜元素】的出现次数
       let elementalCasts = 0;
       
-      // 来源 A：丹青【齐昊】(ice_5) 召唤
-      // 完美复刻冰箭减 CD 逻辑，以精准对接冰霜元素的出场频率
       if (selectedCards && selectedCards.includes('ice_5')) {
         let totalArrows = selectedCards.includes('ice_1') ? Math.floor(240 / 6) : 0;
         if (selectedCards.includes('ice_3')) {
           totalArrows += Math.floor(240 / 14) * 3;
         }
-        // 齐昊内置60秒CD，每支冰箭减2秒
         elementalCasts += Math.floor((240 + totalArrows * 2) / 60);
       }
       
-      // 来源 B：5级联动主动技能【凝冰霜华】召唤
-      // 按照我们之前定义的模型，4分钟约释放 2.5 次主动大招
       if (lvl >= 5 && activeSkill === '凝冰霜华') {
         elementalCasts += 2.5; 
       }
       
-      // 4. 只有当冰霜元素被成功召唤时，才核算伤害
       if (elementalCasts > 0) {
-        // 破裂本体总伤
         let totalDamage = baseDamage * levelMultiplier * elementalCasts;
-        
-        // 3级及以上质变：每次召唤额外附加 DOT 伤害
-        if (lvl >= 3) {
-          totalDamage += 76692 * elementalCasts;
-        }
-        
-        // 汇总得分并乘上全局通用倍率
-        score += totalDamage * multiplier;
+        if (lvl >= 3) totalDamage += 76692 * elementalCasts;
+        score += totalDamage * dynamicGlobalMultiplier;
       }
+
     } else if (spirit === '寒晶刺') { 
-      // 1. 基础伤害参数
       const baseDamagePerThorn = 10992;
-      const thornsPerTrigger = 3; // 每次触发召唤3枚
-      const baseTriggerDamage = baseDamagePerThorn * thornsPerTrigger; // 单次触发基础总伤 32976
-      
-      // 2. 专属等级伤害倍率：1级为1，之后每级提升 37.5%
+      const thornsPerTrigger = 3; 
+      const baseTriggerDamage = baseDamagePerThorn * thornsPerTrigger; 
       const levelMultiplier = 1 + (lvl - 1) * 0.375;
       
-      // 3. 计算 4 分钟 (240秒) 内丹青【冰箭】的总发射数量
       let totalArrows = 0;
-      if (selectedCards && selectedCards.includes('ice_1')) { // 燕虹：每6秒1枚
-        totalArrows += Math.floor(240 / 6);
-      }
-      if (selectedCards && selectedCards.includes('ice_3')) { // 文敏：每14秒3枚
-        totalArrows += Math.floor(240 / 14) * 3;
-      }
+      if (selectedCards && selectedCards.includes('ice_1')) totalArrows += Math.floor(240 / 6);
+      if (selectedCards && selectedCards.includes('ice_3')) totalArrows += Math.floor(240 / 14) * 3;
       
-      // 根据冰箭数量计算基础触发次数 (每 10 枚触发 1 次)
       let triggerCount = Math.floor(totalArrows / 10);
       
-      // 4. 5级联动质变：召唤【冰霜元素】使自身获得 2 层寒晶刺效果 (即白嫖 2 次触发)
       if (lvl >= 5) {
         let appearanceCount = 0;
-        
-        // 来源 A：齐昊 (ice_5) 召唤 (复用精准减CD逻辑)
-        if (selectedCards && selectedCards.includes('ice_5')) {
-          appearanceCount += Math.floor((240 + totalArrows * 2) / 60);
-        }
-        
-        // 来源 B：主动技能【凝冰霜华】召唤 (按4分钟2.5次计)
-        if (activeSkill === '凝冰霜华') {
-          appearanceCount += 2.5; 
-        }
-        
-        // 每次出现冰霜元素，额外提供 2 次寒晶刺触发
+        if (selectedCards && selectedCards.includes('ice_5')) appearanceCount += Math.floor((240 + totalArrows * 2) / 60);
+        if (activeSkill === '凝冰霜华') appearanceCount += 2.5; 
         triggerCount += appearanceCount * 2;
       }
-      // 5. 核算最终伤害
+
       if (triggerCount > 0) {
-        // 寒晶刺本体总伤
         let totalDamage = baseTriggerDamage * levelMultiplier * triggerCount;
-        
-        // 3级联动质变：每次造成伤害时 100% 触发【碎裂】
         if (lvl >= 3) {
-          // 每次触发有 3 枚刺，意味着每次触发能打出 3 次碎裂！
           const totalHits = triggerCount * 3;
-          
-          // 碎裂的基础伤害 (与左归丹青中的碎裂伤害 8484 保持一致)
           const shatterBaseDamage = 8484; 
-          
-          // 如果你希望丹青左归 (ice_4) 的 14% 增伤也能拐到这里的碎裂，可以加上这个乘区
           let shatterMultiplier = 1;
-          if (selectedCards && selectedCards.includes('ice_4')) {
-            shatterMultiplier += 0.14;
-          }
-          
+          if (selectedCards && selectedCards.includes('ice_4')) shatterMultiplier += 0.14;
           totalDamage += totalHits * shatterBaseDamage * shatterMultiplier;
         }
-        
-        // 汇总得分并乘上全局通用倍率
-        score += totalDamage * multiplier;
+        score += totalDamage * dynamicGlobalMultiplier;
       }
+
     } else if (spirit === '烈火燎原') {
-      // 1. 基础伤害参数
       const baseTickDamage = 29308;
-      const duration = 8; // 持续8秒，每秒1次，共8次伤害
-      const baseTriggerDamage = baseTickDamage * duration; // 单次触发基础总伤 234464
-      
-      // 2. 专属等级伤害倍率：1级为1，之后每级提升 37.5%
+      const duration = 8; 
+      const baseTriggerDamage = baseTickDamage * duration; 
       const levelMultiplier = 1 + (lvl - 1) * 0.375;
       
-      // 3. 计算 4 分钟 (240秒) 内【灼灼天炎】的触发次数
-      // 假设【灼灼天炎】是天火系主动技能，4分钟释放 2.5 次
       let triggerCount = 0;
-      if (activeSkill === '灼灼天炎') {
-        triggerCount = 2.5; 
-      }
+      if (activeSkill === '灼灼天炎') triggerCount = 2.5; 
       
-      // 4. 只有前置条件触发时，才核算这块石头的收益
       if (triggerCount > 0) {
-        // 烈火燎原本体总伤
         let totalDamage = baseTriggerDamage * levelMultiplier * triggerCount;
         
-        // 3级联动质变：高频产出天火值
         if (lvl >= 3) {
-          // 每次触发有 8 跳伤害，每跳 1500，单次触发产出 12000 点天火值！
-          // 这意味着每次触发【烈火燎原】都会必定溢出 10000 点触发一次天火激化
           const extraTianhuoValue = duration * 1500 * triggerCount;
           const intensifyTriggers = Math.floor(extraTianhuoValue / 10000);
           
-          // 对接天火激化伤害 (读取神火迸发/赤焰天环的增伤)
           let baseIntensifyDamage = 195905;
           if (spiritCounts['神火迸发'] >= 3) baseIntensifyDamage *= 1.2;
           if (spiritCounts['赤焰天环'] >= 5) baseIntensifyDamage *= (8 / 5);
           
-          // 将额外触发的激化伤害并入这块石头的总收益中
           totalDamage += intensifyTriggers * baseIntensifyDamage;
         }
-    
-        // 汇总得分并乘上全局通用倍率
-        score += totalDamage * multiplier;
+        score += totalDamage * dynamicGlobalMultiplier;
       }
+
     } else if (spirit === '天火陨星') {
-      // 1. 基础伤害参数
       const baseDamage = 26594;
-      
-      // 基础触发次数：进战1次 + 240秒内每20秒1次 (240/20) = 13次
       const baseTriggerCount = Math.floor(240 / 20) + 1; 
-      
-      // 2. 专属等级伤害倍率：1级为1，之后每级提升 37.5%
       const levelMultiplier = 1 + (lvl - 1) * 0.375;
-      
-      // 单颗陨星附带的天火值 (1-2级2000，3级及以上因为附带DoT多加1000)
       const valuePerMeteor = lvl >= 3 ? 3000 : 2000; 
       
-      // 3. 计算本局战斗的“基础天火值”池 (用于 5 级联动推演)
       let baseTianhuoValue = baseTriggerCount * valuePerMeteor;
       
-      // 📡 跨模块数据联动：收集外部环境产出的天火值
-      // (1) 烈火燎原 (3级以上)
       if (spiritCounts['烈火燎原'] >= 3 && activeSkill === '灼灼天炎') {
-        baseTianhuoValue += 2.5 * 8 * 1500; // 约 30000
+        baseTianhuoValue += 2.5 * 8 * 1500; 
       }
-      // (2) 丹青猛虎体系 (fire_2)
       if (selectedCards && selectedCards.includes('fire_2')) {
-        baseTianhuoValue += 31600; // 巨蚁与六尾的联动产出期望
+        baseTianhuoValue += 31600; 
       }
       
-      // 4. 5级联动质变：解开无限套娃！
       let finalMeteorCount = baseTriggerCount;
-      
       if (lvl >= 5) {
-        // 使用代数公式直接求出最终极限激化次数：I = V_base / (10000 - V_m)
         const totalIntensifies = Math.floor(baseTianhuoValue / (10000 - valuePerMeteor));
-        
-        // 激化触发时奖励等量的额外陨星
         finalMeteorCount += totalIntensifies;
       }
       
-      // 5. 核算最终伤害
-      // 陨星本体爆发伤害
       let totalDamage = baseDamage * levelMultiplier * finalMeteorCount;
-      
-      // 3级联动质变：10秒燃烧DoT (每次陨星附带 5 跳，每跳 5342)
       if (lvl >= 3) {
         const dotTickDamage = 5342;
         const ticksPerTrigger = 5; 
         totalDamage += (dotTickDamage * ticksPerTrigger) * finalMeteorCount;
       }
       
-      // 汇总得分并乘上全局通用倍率 (包含了烈火燎原等全局拐)
-      score += totalDamage * multiplier;
+      score += totalDamage * dynamicGlobalMultiplier;
+
     } else if (spirit === '寒潮冰涌') {
-      // 1. 基础单次伤害
       const baseDamage = 38144;
-      
-      // 2. 专属等级伤害倍率：1级为1，之后每级提升 37.5%
       const levelMultiplier = 1 + (lvl - 1) * 0.375;
-      
-      // 3. 计算 4 分钟 (240秒) 内的触发次数
-      // 1~2级 CD 30秒 (9次)，3级及以上 CD 20秒 (13次)
       let casts = lvl >= 3 ? 13 : 9; 
-      
-      // 4. 5级联动机制
-      if (lvl >= 5 && activeSkill === '凝冰霜华') {
-        // 凝冰霜华持续期间放4道，按4分钟放2.5次大招计算，额外触发 10 次
-        casts += 10; 
-      }
-      // 5. 汇总得分并乘上全局 multiplier
-      score += baseDamage * levelMultiplier * casts * multiplier;
+      if (lvl >= 5 && activeSkill === '凝冰霜华') casts += 10; 
+      score += baseDamage * levelMultiplier * casts * dynamicGlobalMultiplier;
+
     } else if (spirit === '神木骰') {
-      score += 150000 * multiplier;
+      score += 150000 * dynamicGlobalMultiplier;
     } else if (spirit === '五雷珠') {
-      score += 130000 * multiplier; 
+      score += 130000 * dynamicGlobalMultiplier; 
     } else if (spirit === '惊雷戟') {
-      score += 20000 * multiplier; 
-    } else if (spirit === '雷霆震击') {
-      score += 0;
+      score += 20000 * dynamicGlobalMultiplier; 
     } else if (spirit === '赤焰天环') {
-      // 1. 基础单次伤害（3,080），带通用等级倍率加成
       let baseHit = 3080 * multiplier;
-
-      // 2. 3级及以上：额外触发1次（2倍伤害）
-      if (lvl >= 3) {
-        baseHit *= 2;
-      }
-
-      // 3. 计算单次天火激化期间的触发次数
-      // 1~4级：10秒内每2秒1次 = 5次
-      // 5级：间隔变为1.5秒，时间延长至12秒 = 8次
+      if (lvl >= 3) baseHit *= 2;
       let hitsPerIntensify = lvl >= 5 ? 8 : 5;
       let totalDamagePerIntensify = baseHit * hitsPerIntensify;
 
-      // 4. 计算 4 分钟内天火激化总触发次数（依天火值产出而定）
       let fireValue = 0;
       if (spiritCounts['天火陨星']) {
         const meteorLvl = Math.min(spiritCounts['天火陨星'], 5);
@@ -305,17 +213,12 @@ function calculateDamageScore(combo, selectedCards = []) {
         if (meteorLvl >= 3) fireValue += 16000;
       }
       const triggerCount = Math.floor(fireValue / 10000);
+      score += totalDamagePerIntensify * triggerCount * dynamicGlobalMultiplier;
 
-      // 5. 只有触发了天火激化，赤焰天环才生效
-      score += totalDamagePerIntensify * triggerCount;
     } else if (spirit === '神火迸发') {
-      // 1. 先计算单次喷发的伤害（结合等级倍率与5级二次喷发）
       let singleEruption = 65290 * multiplier;
-      if (lvl >= 5) {
-        singleEruption *= 2; // 5级额外造成 1 次伤害
-      }
-
-      // 2. 计算 4 分钟内天火激化的触发次数（目前由天火陨星等产出天火值）
+      if (lvl >= 5) singleEruption *= 2; 
+      
       let fireValue = 0;
       if (spiritCounts['天火陨星']) {
         const meteorLvl = Math.min(spiritCounts['天火陨星'], 5);
@@ -323,44 +226,30 @@ function calculateDamageScore(combo, selectedCards = []) {
         if (meteorLvl >= 3) fireValue += 16000;
       }
       const triggerCount = Math.floor(fireValue / 10000);
+      score += singleEruption * triggerCount * dynamicGlobalMultiplier;
 
-      // 只有触发了天火激化，神火迸发才会跟着喷发
-      score += singleEruption * triggerCount;
     } else if (spirit === '裂地崩') {
-      // 1. 基础释放伤害（207,708），4分钟树人召唤约 2.5 次
       let totalDamage = 207708 * multiplier * 2.5;
+      if (lvl >= 3) totalDamage += 86610 * 2.5;
+      if (lvl >= 5) totalDamage += 2887 * 20;
+      score += totalDamage * dynamicGlobalMultiplier;
 
-      // 2. 3级及以上解锁 DOT（30秒内每秒 2887 伤害，单次回响总伤害 86,610）
-      if (lvl >= 3) {
-        totalDamage += 86610 * 2.5;
-      }
-
-      // 3. 5级解锁召唤物攻击提前触发回响（按 4 分钟召唤物攻击频繁触发，约额外结算 20 次回响）
-      if (lvl >= 5) {
-        totalDamage += 2887 * 20;
-      }
-
-      score += totalDamage;
     } else {
-      // T3 常规组
-      score += 50000 * multiplier; 
+      // 3. 移除未知石头的保底高分，防止无机制的废石头扰乱评级
+      score += 0; 
     }
   }
 
-
-
-  // 3. 叠加四元素激化得分
+  // 4. 叠加四元素激化得分 (激化基础伤害不吃石头自身的增伤乘区，保持原样)
   score += calcFireIntensify(spiritCounts);
   score += calcIceIntensify(spiritCounts);
-  score += calcWoodIntensify(spiritCounts, activeSkill); // <-- 传入 activeSkill
+  score += calcWoodIntensify(spiritCounts, activeSkill); 
   score += calcThunderIntensify(spiritCounts);
 
-  // 4. 丹青绘灵卡牌加成计算
+  // 5. 丹青绘灵卡牌加成计算
   if (selectedCards && selectedCards.length > 0) {
-    // 直接调用我们写好的硬核计算模型，传入选中的卡牌数组
     score += calcDanqingDamage(selectedCards, spiritCounts);
   }
-
 
   return Math.floor(score);
 }
