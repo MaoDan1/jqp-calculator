@@ -301,8 +301,11 @@ import { DANQING_CARDS } from './constants/cards.js';
 const selectedCards = ref(JSON.parse(localStorage.getItem('jiqiaopan_danqing')) || []);
 
 watch(selectedCards, (newVal) => {
+  // 依然保留本地缓存功能，刷新网页卡牌选择不会丢
   localStorage.setItem('jiqiaopan_danqing', JSON.stringify(newVal));
-  triggerAutoSolve(); // 切换卡牌时自动触发重算
+  
+  // ❌ 删掉或注释掉下面这行，彻底关闭丹青界面的“点一下算一下”
+  // triggerAutoSolve(); 
 }, { deep: true });
 
 const toggleCard = (cardId) => {

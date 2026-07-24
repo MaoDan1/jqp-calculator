@@ -5,6 +5,8 @@ function calculateDamageScore(combo, selectedCards = []) {
   let score = 0; 
   const spiritCounts = {};
   let activeSkill = '无';
+  // 🌟 新增：专门用于跨模块传递数据的独立变量
+  let dynamicIceValue = 0;
   
   for (let i = 0; i < combo.length; i++) {
     const stone = combo[i];
@@ -188,12 +190,31 @@ function calculateDamageScore(combo, selectedCards = []) {
       score += totalDamage * dynamicGlobalMultiplier;
 
     } else if (spirit === '寒潮冰涌') {
+      // 1/5 效果：基础伤害
       const baseDamage = 38144;
+      
+      // 2/5 ~ 5/5 效果：基础伤害提高 37.5%
       const levelMultiplier = 1 + (lvl - 1) * 0.375;
-      let casts = lvl >= 3 ? 13 : 9; 
-      if (lvl >= 5 && activeSkill === '凝冰霜华') casts += 10; 
+      
+      // 3/5 效果判定：生效间隔缩短 10 秒
+      const interval = lvl >= 3 ? (30 - 10) : 30;
+      
+      // 1/5 效果：进入战斗 (首发 1 次) 及之后每 interval 秒获得效果
+      let casts = 1 + Math.floor(240 / interval);
+      
+      // 5/5 效果：凝冰霜华期间释放 4 道寒潮 (按4分钟2.5次大招计算)
+      if (lvl >= 5 && activeSkill === '凝冰霜华') {
+        casts += (4 * 2.5); 
+      }
+      
+      // 核算总直伤
       score += baseDamage * levelMultiplier * casts * dynamicGlobalMultiplier;
-
+      
+      // 3/5 效果：对命中的敌人累加 2000 玄冰值
+      if (lvl >= 3) {
+        // 传递给底层的玄冰激化函数
+        dynamicIceValue = casts * 2000;
+      }
     } else if (spirit === '神木骰') {
       score += 150000 * dynamicGlobalMultiplier;
     } else if (spirit === '五雷珠') {
@@ -242,7 +263,7 @@ function calculateDamageScore(combo, selectedCards = []) {
 
   // 4. 叠加四元素激化得分 (激化基础伤害不吃石头自身的增伤乘区，保持原样)
   score += calcFireIntensify(spiritCounts);
-  score += calcIceIntensify(spiritCounts);
+  score += calcIceIntensify(spiritCounts, dynamicIceValue);
   score += calcWoodIntensify(spiritCounts, activeSkill); 
   score += calcThunderIntensify(spiritCounts);
 
