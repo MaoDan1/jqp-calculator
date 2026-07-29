@@ -302,7 +302,7 @@ function calcFireIntensify(spiritCounts) {
 }
 
 // 2. 玄冰激化（动态计算触发次数）
-function calcIceIntensify(spiritCounts) {
+function calcIceIntensify(spiritCounts, dynamicIceValue) {
   let iceValue = 0;
 
   // 🌟 直接加上外部传进来的真实玄冰值
